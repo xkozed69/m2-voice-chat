@@ -2,6 +2,7 @@
 #pragma once
 #include <stdint.h>
 #include <string>
+#include <vector>
 #include "voice_chat_errors.h"
 
 // Use static lib
@@ -64,6 +65,15 @@ namespace amun
 		// default = 250ms. Acts as a jitter buffer.
 		// Don't forget to take possible network delays into consideration when changing this.
 		void setPlaybackDelay(uint32_t milliseconds);
+
+		// Capture (microphone) device selection. Names are UTF-8, in miniaudio's
+		// enumeration order; the list changes when devices are (un)plugged.
+		std::vector<std::string> getCaptureDeviceNames();
+
+		// index < 0 = system default device. Re-creates the recorder on the new
+		// device and resumes recording if it was active. Returns false on an
+		// invalid index or when the new device cannot be initialized.
+		bool setCaptureDevice(int32_t index);
 
 		// default = 100, min = 0, max = 100
 		void setVolume(const std::string& speakerID, float volume = 100.0f);

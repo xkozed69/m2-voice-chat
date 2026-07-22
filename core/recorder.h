@@ -17,12 +17,13 @@ namespace amun
 			destroy();
 		}
 
-		bool initialize(uint32_t sampleRate, uint8_t channelCount)
+		bool initialize(uint32_t sampleRate, uint8_t channelCount, const ma_device_id* pDeviceId = nullptr)
 		{
 			if (ma_device_get_state(&m_Device) != ma_device_state_uninitialized)
 				return false;
 
 			ma_device_config deviceConfig = ma_device_config_init(ma_device_type_capture);
+			deviceConfig.capture.pDeviceID = pDeviceId;
 			deviceConfig.capture.format = SAMPLE_FORMAT;
 			deviceConfig.capture.channels = channelCount;
 			deviceConfig.sampleRate = sampleRate;
@@ -48,6 +49,11 @@ namespace amun
 		bool isInitialized() const
 		{
 			return ma_device_get_state(&m_Device) != ma_device_state_uninitialized;
+		}
+
+		bool isRecording() const
+		{
+			return ma_device_get_state(&m_Device) == ma_device_state_started;
 		}
 
 		bool start()

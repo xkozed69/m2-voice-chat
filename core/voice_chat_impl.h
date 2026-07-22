@@ -15,7 +15,7 @@ namespace amun
 	{
 	public:
 		VoiceChatImpl(VoiceChat* parent)
-			: m_Parent(parent), m_SampleRate(0), m_ChannelCount(0), m_PlaybackDelay(250), m_TargetSpl(0)
+			: m_Parent(parent), m_SampleRate(0), m_ChannelCount(0), m_PlaybackDelay(250), m_TargetSpl(0), m_HasCustomCaptureDevice(false)
 		{}
 
 		~VoiceChatImpl()
@@ -29,7 +29,7 @@ namespace amun
 			m_ChannelCount = channelCount;
 
 			m_Recorder.registerSignalReceiver(this, VOICE_CHAT_SIGNAL_SAMPLES_READY);
-			m_Recorder.initialize(m_SampleRate, m_ChannelCount);
+			m_Recorder.initialize(m_SampleRate, m_ChannelCount, captureDeviceIdPtr());
 
 			m_Playback.registerSignalReceiver(this, 0);
 			m_Playback.initialize(m_SampleRate, m_ChannelCount);
@@ -59,12 +59,87 @@ namespace amun
 
 		bool startRecording()
 		{
+			// The recorder is dead when no usable device existed at init() time (or a
+			// start failed); retry with the current selection so hot-plugged
+			// microphones start working without a full re-init.
+			if (!m_Recorder.isInitialized())
+			{
+				if (!m_Recorder.initialize(m_SampleRate, m_ChannelCount, captureDeviceIdPtr()))
+					return false;
+			}
+
 			return m_Recorder.start();
 		}
 
 		void stopRecording()
 		{
 			m_Recorder.stop();
+		}
+
+		std::vector<std::string> getCaptureDeviceNames()
+		{
+			std::vector<std::string> names;
+
+			ma_context context;
+			if (ma_context_init(nullptr, 0, nullptr, &context) != MA_SUCCESS)
+				return names;
+
+			ma_device_info* pCaptureInfos = nullptr;
+			ma_uint32 captureCount = 0;
+			if (ma_context_get_devices(&context, nullptr, nullptr, &pCaptureInfos, &captureCount) == MA_SUCCESS)
+			{
+				names.reserve(captureCount);
+				for (ma_uint32 i = 0; i < captureCount; ++i)
+					names.push_back(pCaptureInfos[i].name);
+			}
+
+			ma_context_uninit(&context);
+			return names;
+		}
+
+		bool setCaptureDevice(int32_t index)
+		{
+			if (index < 0)
+			{
+				m_HasCustomCaptureDevice = false;
+			}
+			else
+			{
+				ma_context context;
+				if (ma_context_init(nullptr, 0, nullptr, &context) != MA_SUCCESS)
+					return false;
+
+				ma_device_info* pCaptureInfos = nullptr;
+				ma_uint32 captureCount = 0;
+				bool found = ma_context_get_devices(&context, nullptr, nullptr, &pCaptureInfos, &captureCount) == MA_SUCCESS
+					&& static_cast<ma_uint32>(index) < captureCount;
+
+				if (found)
+				{
+					m_CaptureDeviceId = pCaptureInfos[index].id;
+					m_HasCustomCaptureDevice = true;
+				}
+
+				ma_context_uninit(&context);
+
+				if (!found)
+					return false;
+			}
+
+			// Selected before init(): only remember it, init() will pick it up.
+			if (m_SampleRate == 0)
+				return true;
+
+			// Re-create the recorder on the newly selected device.
+			bool wasRecording = m_Recorder.isRecording();
+			m_Recorder.destroy();
+			if (!m_Recorder.initialize(m_SampleRate, m_ChannelCount, captureDeviceIdPtr()))
+				return false;
+
+			if (wasRecording)
+				return m_Recorder.start();
+
+			return true;
 		}
 
 		bool isReady() const
@@ -176,6 +251,11 @@ namespace amun
 		}
 
 	private:
+		const ma_device_id* captureDeviceIdPtr() const
+		{
+			return m_HasCustomCaptureDevice ? &m_CaptureDeviceId : nullptr;
+		}
+
 		void sendError(uint8_t error)
 		{
 			if (m_Parent)
@@ -232,6 +312,9 @@ namespace amun
 
 		Recorder m_Recorder;
 		Playback m_Playback;
+
+		ma_device_id m_CaptureDeviceId;
+		bool m_HasCustomCaptureDevice;
 
 		FLACEncoder m_Encoder;
 		FLACDecoder m_Decoder;

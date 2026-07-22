@@ -74,6 +74,16 @@ namespace amun
 		return m_Impl->setPlaybackDelay(milliseconds);
 	}
 
+	std::vector<std::string> VoiceChat::getCaptureDeviceNames()
+	{
+		return m_Impl->getCaptureDeviceNames();
+	}
+
+	bool VoiceChat::setCaptureDevice(int32_t index)
+	{
+		return m_Impl->setCaptureDevice(index);
+	}
+
 	void VoiceChat::addSamples(const std::string& name, const SAMPLE_TYPE* samples, uint32_t sampleCount)
 	{
 		m_Impl->addSamples(name, samples, sampleCount);
