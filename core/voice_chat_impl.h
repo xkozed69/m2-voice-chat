@@ -15,11 +15,13 @@ namespace amun
 	{
 	public:
 		VoiceChatImpl(VoiceChat* parent)
-			: m_Parent(parent), m_SampleRate(0), m_ChannelCount(0), m_PlaybackDelay(250), m_TargetSpl(0), m_HasCustomCaptureDevice(false), m_HasCustomPlaybackDevice(false)
+			: m_Parent(parent), m_SampleRate(0), m_ChannelCount(0), m_PlaybackDelay(250), m_TargetSpl(0), m_HasCustomCaptureDevice(false), m_HasCustomPlaybackDevice(false), m_EnumContextReady(false)
 		{}
 
 		~VoiceChatImpl()
 		{
+			if (m_EnumContextReady)
+				ma_context_uninit(&m_EnumContext);
 			m_Parent = nullptr;
 		}
 
@@ -80,55 +82,57 @@ namespace amun
 		{
 			std::vector<std::string> names;
 
-			ma_context context;
-			if (ma_context_init(nullptr, 0, nullptr, &context) != MA_SUCCESS)
+			ma_context* pContext = enumContext();
+			if (!pContext)
 				return names;
 
 			ma_device_info* pCaptureInfos = nullptr;
 			ma_uint32 captureCount = 0;
-			if (ma_context_get_devices(&context, nullptr, nullptr, &pCaptureInfos, &captureCount) == MA_SUCCESS)
+			if (ma_context_get_devices(pContext, nullptr, nullptr, &pCaptureInfos, &captureCount) == MA_SUCCESS)
 			{
 				names.reserve(captureCount);
 				for (ma_uint32 i = 0; i < captureCount; ++i)
 					names.push_back(pCaptureInfos[i].name);
 			}
 
-			ma_context_uninit(&context);
 			return names;
 		}
 
 		bool setCaptureDevice(int32_t index)
 		{
+			ma_context* pContext = enumContext();
+			if (!pContext)
+				return false;
+
+			ma_device_info* pCaptureInfos = nullptr;
+			ma_uint32 captureCount = 0;
+			if (ma_context_get_devices(pContext, nullptr, nullptr, &pCaptureInfos, &captureCount) != MA_SUCCESS)
+				return false;
+
 			if (index < 0)
 			{
 				m_HasCustomCaptureDevice = false;
 			}
 			else
 			{
-				ma_context context;
-				if (ma_context_init(nullptr, 0, nullptr, &context) != MA_SUCCESS)
+				if (static_cast<ma_uint32>(index) >= captureCount)
 					return false;
 
-				ma_device_info* pCaptureInfos = nullptr;
-				ma_uint32 captureCount = 0;
-				bool found = ma_context_get_devices(&context, nullptr, nullptr, &pCaptureInfos, &captureCount) == MA_SUCCESS
-					&& static_cast<ma_uint32>(index) < captureCount;
-
-				if (found)
-				{
-					m_CaptureDeviceId = pCaptureInfos[index].id;
-					m_HasCustomCaptureDevice = true;
-				}
-
-				ma_context_uninit(&context);
-
-				if (!found)
-					return false;
+				m_CaptureDeviceId = pCaptureInfos[index].id;
+				m_HasCustomCaptureDevice = true;
 			}
 
 			// Selected before init(): only remember it, init() will pick it up.
 			if (m_SampleRate == 0)
 				return true;
+
+			// No capture device at all: park the recorder instead of running a
+			// doomed (and slow) default-device init attempt.
+			if (captureCount == 0)
+			{
+				m_Recorder.destroy();
+				return index < 0;
+			}
 
 			// Re-create the recorder on the newly selected device.
 			bool wasRecording = m_Recorder.isRecording();
@@ -146,55 +150,57 @@ namespace amun
 		{
 			std::vector<std::string> names;
 
-			ma_context context;
-			if (ma_context_init(nullptr, 0, nullptr, &context) != MA_SUCCESS)
+			ma_context* pContext = enumContext();
+			if (!pContext)
 				return names;
 
 			ma_device_info* pPlaybackInfos = nullptr;
 			ma_uint32 playbackCount = 0;
-			if (ma_context_get_devices(&context, &pPlaybackInfos, &playbackCount, nullptr, nullptr) == MA_SUCCESS)
+			if (ma_context_get_devices(pContext, &pPlaybackInfos, &playbackCount, nullptr, nullptr) == MA_SUCCESS)
 			{
 				names.reserve(playbackCount);
 				for (ma_uint32 i = 0; i < playbackCount; ++i)
 					names.push_back(pPlaybackInfos[i].name);
 			}
 
-			ma_context_uninit(&context);
 			return names;
 		}
 
 		bool setPlaybackDevice(int32_t index)
 		{
+			ma_context* pContext = enumContext();
+			if (!pContext)
+				return false;
+
+			ma_device_info* pPlaybackInfos = nullptr;
+			ma_uint32 playbackCount = 0;
+			if (ma_context_get_devices(pContext, &pPlaybackInfos, &playbackCount, nullptr, nullptr) != MA_SUCCESS)
+				return false;
+
 			if (index < 0)
 			{
 				m_HasCustomPlaybackDevice = false;
 			}
 			else
 			{
-				ma_context context;
-				if (ma_context_init(nullptr, 0, nullptr, &context) != MA_SUCCESS)
+				if (static_cast<ma_uint32>(index) >= playbackCount)
 					return false;
 
-				ma_device_info* pPlaybackInfos = nullptr;
-				ma_uint32 playbackCount = 0;
-				bool found = ma_context_get_devices(&context, &pPlaybackInfos, &playbackCount, nullptr, nullptr) == MA_SUCCESS
-					&& static_cast<ma_uint32>(index) < playbackCount;
-
-				if (found)
-				{
-					m_PlaybackDeviceId = pPlaybackInfos[index].id;
-					m_HasCustomPlaybackDevice = true;
-				}
-
-				ma_context_uninit(&context);
-
-				if (!found)
-					return false;
+				m_PlaybackDeviceId = pPlaybackInfos[index].id;
+				m_HasCustomPlaybackDevice = true;
 			}
 
 			// Selected before init(): only remember it, init() will pick it up.
 			if (m_SampleRate == 0)
 				return true;
+
+			// No playback device at all: park the mixer instead of running a
+			// doomed (and slow) default-device init attempt.
+			if (playbackCount == 0)
+			{
+				m_Playback.destroy();
+				return index < 0;
+			}
 
 			// Re-create the playback mixer on the newly selected device. The
 			// per-speaker buffers are dropped; incoming packets refill them.
@@ -379,6 +385,22 @@ namespace amun
 		}
 
 	private:
+		// Long-lived enumeration context. Creating a context per query stalls
+		// the caller with a full backend/COM init, so one is created lazily
+		// and reused; ma_context_get_devices re-enumerates on every call, so
+		// hot-plugged devices stay visible.
+		ma_context* enumContext()
+		{
+			if (!m_EnumContextReady)
+			{
+				if (ma_context_init(nullptr, 0, nullptr, &m_EnumContext) != MA_SUCCESS)
+					return nullptr;
+				m_EnumContextReady = true;
+			}
+			return &m_EnumContext;
+		}
+
+	private:
 		VoiceChat* m_Parent;
 		uint32_t m_SampleRate;
 		uint8_t m_ChannelCount;
@@ -391,6 +413,9 @@ namespace amun
 
 		ma_device_id m_PlaybackDeviceId;
 		bool m_HasCustomPlaybackDevice;
+
+		ma_context m_EnumContext;
+		bool m_EnumContextReady;
 
 		FLACEncoder m_Encoder;
 		FLACDecoder m_Decoder;
