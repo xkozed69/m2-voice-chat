@@ -15,7 +15,7 @@ namespace amun
 	{
 	public:
 		VoiceChatImpl(VoiceChat* parent)
-			: m_Parent(parent), m_SampleRate(0), m_ChannelCount(0), m_PlaybackDelay(250), m_TargetSpl(0), m_HasCustomCaptureDevice(false)
+			: m_Parent(parent), m_SampleRate(0), m_ChannelCount(0), m_PlaybackDelay(250), m_TargetSpl(0), m_HasCustomCaptureDevice(false), m_HasCustomPlaybackDevice(false)
 		{}
 
 		~VoiceChatImpl()
@@ -32,7 +32,7 @@ namespace amun
 			m_Recorder.initialize(m_SampleRate, m_ChannelCount, captureDeviceIdPtr());
 
 			m_Playback.registerSignalReceiver(this, 0);
-			m_Playback.initialize(m_SampleRate, m_ChannelCount);
+			m_Playback.initialize(m_SampleRate, m_ChannelCount, playbackDeviceIdPtr());
 			m_Playback.setSilenceDuration(m_PlaybackDelay);
 
 			if (uint8_t err = m_Encoder.initialize(sampleRate, channelCount, m_Recorder.getSampleCountByCaptureFrequency()))
@@ -142,6 +142,70 @@ namespace amun
 			return true;
 		}
 
+		std::vector<std::string> getPlaybackDeviceNames()
+		{
+			std::vector<std::string> names;
+
+			ma_context context;
+			if (ma_context_init(nullptr, 0, nullptr, &context) != MA_SUCCESS)
+				return names;
+
+			ma_device_info* pPlaybackInfos = nullptr;
+			ma_uint32 playbackCount = 0;
+			if (ma_context_get_devices(&context, &pPlaybackInfos, &playbackCount, nullptr, nullptr) == MA_SUCCESS)
+			{
+				names.reserve(playbackCount);
+				for (ma_uint32 i = 0; i < playbackCount; ++i)
+					names.push_back(pPlaybackInfos[i].name);
+			}
+
+			ma_context_uninit(&context);
+			return names;
+		}
+
+		bool setPlaybackDevice(int32_t index)
+		{
+			if (index < 0)
+			{
+				m_HasCustomPlaybackDevice = false;
+			}
+			else
+			{
+				ma_context context;
+				if (ma_context_init(nullptr, 0, nullptr, &context) != MA_SUCCESS)
+					return false;
+
+				ma_device_info* pPlaybackInfos = nullptr;
+				ma_uint32 playbackCount = 0;
+				bool found = ma_context_get_devices(&context, &pPlaybackInfos, &playbackCount, nullptr, nullptr) == MA_SUCCESS
+					&& static_cast<ma_uint32>(index) < playbackCount;
+
+				if (found)
+				{
+					m_PlaybackDeviceId = pPlaybackInfos[index].id;
+					m_HasCustomPlaybackDevice = true;
+				}
+
+				ma_context_uninit(&context);
+
+				if (!found)
+					return false;
+			}
+
+			// Selected before init(): only remember it, init() will pick it up.
+			if (m_SampleRate == 0)
+				return true;
+
+			// Re-create the playback mixer on the newly selected device. The
+			// per-speaker buffers are dropped; incoming packets refill them.
+			m_Playback.destroy();
+			if (!m_Playback.initialize(m_SampleRate, m_ChannelCount, playbackDeviceIdPtr()))
+				return false;
+
+			m_Playback.setSilenceDuration(m_PlaybackDelay);
+			return m_Playback.start();
+		}
+
 		bool isReady() const
 		{
 			return m_Recorder.isInitialized();
@@ -169,6 +233,10 @@ namespace amun
 
 		void setPlaybackDelay(uint32_t milliseconds)
 		{
+			// Remember the value: init() and setPlaybackDevice() re-apply it
+			// after (re)creating the playback device. Without this, a delay set
+			// before init() was silently reset to the 250ms default.
+			m_PlaybackDelay = milliseconds;
 			m_Playback.setSilenceDuration(milliseconds);
 		}
 
@@ -256,6 +324,11 @@ namespace amun
 			return m_HasCustomCaptureDevice ? &m_CaptureDeviceId : nullptr;
 		}
 
+		const ma_device_id* playbackDeviceIdPtr() const
+		{
+			return m_HasCustomPlaybackDevice ? &m_PlaybackDeviceId : nullptr;
+		}
+
 		void sendError(uint8_t error)
 		{
 			if (m_Parent)
@@ -315,6 +388,9 @@ namespace amun
 
 		ma_device_id m_CaptureDeviceId;
 		bool m_HasCustomCaptureDevice;
+
+		ma_device_id m_PlaybackDeviceId;
+		bool m_HasCustomPlaybackDevice;
 
 		FLACEncoder m_Encoder;
 		FLACDecoder m_Decoder;

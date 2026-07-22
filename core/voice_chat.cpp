@@ -84,6 +84,16 @@ namespace amun
 		return m_Impl->setCaptureDevice(index);
 	}
 
+	std::vector<std::string> VoiceChat::getPlaybackDeviceNames()
+	{
+		return m_Impl->getPlaybackDeviceNames();
+	}
+
+	bool VoiceChat::setPlaybackDevice(int32_t index)
+	{
+		return m_Impl->setPlaybackDevice(index);
+	}
+
 	void VoiceChat::addSamples(const std::string& name, const SAMPLE_TYPE* samples, uint32_t sampleCount)
 	{
 		m_Impl->addSamples(name, samples, sampleCount);

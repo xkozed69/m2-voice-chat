@@ -14,12 +14,13 @@ namespace amun
 			destroy();
 		}
 
-		bool initialize(uint32_t sampleRate, uint8_t channelCount)
+		bool initialize(uint32_t sampleRate, uint8_t channelCount, const ma_device_id* pDeviceId = nullptr)
 		{
 			if (ma_device_get_state(&m_Device) != ma_device_state_uninitialized)
 				return false;
 
 			ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);
+			deviceConfig.playback.pDeviceID = pDeviceId;
 			deviceConfig.playback.format = SAMPLE_FORMAT;
 			deviceConfig.playback.channels = channelCount;
 			deviceConfig.sampleRate = sampleRate;
@@ -169,7 +170,9 @@ namespace amun
 
 		uint32_t samplesPerMillisecond() const
 		{
-			return m_Device.sampleRate * m_Device.capture.channels / 1000;
+			// This is a playback device; capture.channels is always 0 here and
+			// would zero out the jitter-buffer silence padding.
+			return m_Device.sampleRate * m_Device.playback.channels / 1000;
 		}
 
 		void notifyError(uint8_t errorID)

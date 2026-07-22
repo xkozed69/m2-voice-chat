@@ -75,6 +75,16 @@ namespace amun
 		// invalid index or when the new device cannot be initialized.
 		bool setCaptureDevice(int32_t index);
 
+		// Playback (speakers/headphones) device selection. Names are UTF-8, in
+		// miniaudio's enumeration order; the list changes on (un)plug.
+		std::vector<std::string> getPlaybackDeviceNames();
+
+		// index < 0 = system default device. Re-creates the playback mixer on
+		// the new device and restarts it. Pending per-speaker buffers are
+		// dropped (refilled by incoming packets). Returns false on an invalid
+		// index or when the new device cannot be initialized.
+		bool setPlaybackDevice(int32_t index);
+
 		// default = 100, min = 0, max = 100
 		void setVolume(const std::string& speakerID, float volume = 100.0f);
 		void addSamples(const std::string& speakerID, const int16_t* samples, uint32_t sampleCount);
